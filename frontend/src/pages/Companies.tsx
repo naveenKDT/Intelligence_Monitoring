@@ -30,10 +30,10 @@ import {
 } from '@mui/icons-material'
 import { AgGridReact } from 'ag-grid-react'
 import { ColDef, GridReadyEvent } from 'ag-grid-community'
-import 'ag-grid-community/styles/ag-grid.css'
-import 'ag-grid-community/styles/ag-theme-alpine.css'
+//import 'ag-grid-community/styles/ag-grid.css'
+//import 'ag-grid-community/styles/ag-theme-alpine.css'
 
-import { companiesApi } from '../../api/client'
+import { companiesApi } from '../api/client'
 
 const Companies = () => {
   const navigate = useNavigate()

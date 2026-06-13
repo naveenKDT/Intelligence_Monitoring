@@ -3,7 +3,8 @@ from sqlalchemy import (
     ForeignKey, JSON, Index, Table, Enum as SQLEnum
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB, VECTOR
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.sql import func
 import uuid
 import enum

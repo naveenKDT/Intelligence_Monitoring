@@ -29,7 +29,7 @@ import {
   PlayArrow as PlayIcon,
   Notifications as NotificationIcon,
 } from '@mui/icons-material'
-import { monitoringApi, companiesApi } from '../../api/client'
+import { monitoringApi, companiesApi } from '../api/client'
 
 const Monitoring = () => {
   const navigate = useNavigate()

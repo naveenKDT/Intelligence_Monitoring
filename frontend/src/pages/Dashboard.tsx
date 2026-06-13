@@ -22,7 +22,7 @@ import {
 } from '@mui/icons-material'
 import ReactECharts from 'echarts-for-react'
 
-import { dashboardApi } from '../../api/client'
+import { dashboardApi } from '../api/client'
 
 const StatCard = ({
   title,

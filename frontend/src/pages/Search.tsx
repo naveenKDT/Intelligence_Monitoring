@@ -16,7 +16,7 @@ import {
   Paper,
 } from '@mui/material'
 import { Search as SearchIcon, FilterList as FilterIcon } from '@mui/icons-material'
-import { searchApi } from '../../api/client'
+import { searchApi } from '../api/client'
 
 const Search = () => {
   const navigate = useNavigate()

@@ -19,7 +19,7 @@ import {
 } from '@mui/icons-material'
 import ReactECharts from 'echarts-for-react'
 
-import { dashboardApi, searchApi } from '../../api/client'
+import { dashboardApi, searchApi } from '../api/client'
 
 const Industry = () => {
   const { data: industryData, isLoading } = useQuery({

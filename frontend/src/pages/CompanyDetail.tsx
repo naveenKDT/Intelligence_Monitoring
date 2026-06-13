@@ -33,7 +33,7 @@ import {
 } from '@mui/icons-material'
 import ReactECharts from 'echarts-for-react'
 
-import { companiesApi, dashboardApi, intelligenceApi, monitoringApi } from '../../api/client'
+import { companiesApi, dashboardApi, intelligenceApi, monitoringApi } from '../api/client'
 
 const CompanyDetail = () => {
   const { id } = useParams<{ id: string }>()
