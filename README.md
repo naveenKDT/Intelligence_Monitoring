@@ -3,6 +3,89 @@
 ## Overview
 AI-powered Company and Industry Intelligence Platform that continuously collects, organizes, analyzes, and monitors information about companies, industries, products, services, technologies, engineering domains, markets, customers, competitors, and business activities.
 
+## 🚀 NEW: Dynamic Discovery Architecture
+
+The scraper now uses **dynamic discovery rules** instead of hardcoded URLs. Simply configure:
+- **Industries**: IoT, Embedded Systems, Software, Automotive, etc.
+- **Countries**: European countries (DE, FR, NL, BE, etc.)
+
+The scraper automatically generates search queries and discovers companies!
+
+### How It Works
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     DYNAMIC DISCOVERY ENGINE                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │
+│  │   Config     │    │   Config     │    │   Discovery  │          │
+│  │  Industries  │ +  │  Countries   │ →  │    Rules     │          │
+│  │  (16 types)  │    │  (28 EU)     │    │  (Generates  │          │
+│  └──────────────┘    └──────────────┘    │   queries)   │          │
+│                                           └──────┬───────┘          │
+│                                                  │                  │
+│                          ┌───────────────────────┼───────────────┐ │
+│                          ↓                       ↓               │ │
+│                   ┌─────────────┐         ┌─────────────┐       │ │
+│                   │   Search    │         │  Directory  │       │ │
+│                   │ Discovery   │         │ Discovery   │       │ │
+│                   │ (DuckDuckGo │         │ (ThomasNet  │       │ │
+│                   │  Bing)      │         │  Europages) │       │ │
+│                   └──────┬──────┘         └──────┬──────┘       │ │
+│                          └───────────┬───────────┘               │ │
+│                                      ↓                           │ │
+│                               ┌──────────────┐                   │ │
+│                               │ Scrape Queue │                   │ │
+│                               │   + Queue    │                   │ │
+│                               │   Workers    │                   │ │
+│                               └──────┬───────┘                   │ │
+│                                      ↓                           │ │
+│                               ┌──────────────┐                   │ │
+│                               │  Database    │                   │ │
+│                               │  (PostgreSQL)│                   │ │
+│                               └──────────────┘                   │ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Running the Scraper
+```bash
+# Run with all industries and European countries
+python run_scraper.py
+
+# Filter by specific industries
+python run_scraper.py --industries "IoT,Embedded,Automotive"
+
+# Filter by specific countries
+python run_scraper.py --countries "DE,FR,NL"
+
+# More workers for faster scraping
+python run_scraper.py --workers 5
+
+# Run as background daemon
+python run_scraper.py --daemon
+```
+
+### Configured Industries (16 total)
+- IoT (Internet of Things)
+- Embedded Systems
+- Software Development
+- Semiconductors
+- Automotive
+- Automotive Electronics
+- Industrial Automation
+- Robotics
+- Machine Vision
+- Medical Devices
+- Digital Health
+- Renewable Energy
+- Smart Grid
+- Aerospace
+- Agritech
+- Telecommunications
+
+### Configured Countries (28 European)
+Germany (DE), France (FR), Netherlands (NL), Belgium (BE), Austria (AT), Switzerland (CH), Sweden (SE), Denmark (DK), Norway (NO), Finland (FI), Italy (IT), Spain (ES), Portugal (PT), Poland (PL), Czech Republic (CZ), Hungary (HU), Romania (RO), Greece (GR), Ireland (IE), United Kingdom (GB), Luxembourg (LU), Slovenia (SI), Slovakia (SK), Croatia (HR), Estonia (EE), Latvia (LV), Lithuania (LT), Bulgaria (BG)
+
 ## Tech Stack
 
 ### Backend
@@ -112,6 +195,14 @@ cd frontend && npm install
 - `POST /api/v1/chat` - AI chat about companies
 - `GET /api/v1/chat/history/{company_id}` - Chat history
 
+### Configuration (Discovery)
+- `GET /api/v1/config/industries` - List all industries
+- `GET /api/v1/config/industries/{name}` - Get industry details
+- `GET /api/v1/config/countries` - List all countries
+- `GET /api/v1/config/countries/europe` - List European countries
+- `GET /api/v1/config/discovery/status` - Get discovery configuration
+- `GET /api/v1/config/discovery/test-queries` - Test query generation
+
 ## Architecture
 
 ```
@@ -159,13 +250,21 @@ cd frontend && npm install
 intelligence-platform/
 ├── backend/
 │   ├── app/
-│   │   ├── api/              # API routes
+│   │   ├── api/              # API routes (including config for discovery)
+│   │   ├── config/           # Industry & country configurations
+│   │   │   ├── industries.py # 16 industries with search keywords
+│   │   │   └── countries.py  # 28 European countries
 │   │   ├── core/             # Core configuration
 │   │   ├── models/           # SQLAlchemy models
 │   │   ├── schemas/          # Pydantic schemas
 │   │   ├── services/         # Business logic
 │   │   ├── workers/          # Celery tasks
-│   │   └── scraper/          # Web scraping
+│   │   └── scraper/          # Web scraping with dynamic discovery
+│   │       ├── discovery_rules.py    # Dynamic query generation
+│   │       ├── search_discovery.py   # Search engine discovery
+│   │       ├── directory_discovery.py# Directory-based discovery
+│   │       ├── scraper.py            # Core scraping logic
+│   │       └── scraper_service.py    # Continuous scraper service
 │   ├── requirements.txt
 │   └── main.py
 ├── frontend/

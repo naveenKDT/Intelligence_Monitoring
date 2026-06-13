@@ -3,6 +3,7 @@ from app.api.companies import router as companies_router
 from app.api.search import router as search_router
 from app.api.intelligence import router as intelligence_router, chat_router
 from app.api.monitoring import router as monitoring_router, dashboard_router
+from app.api.config import router as config_router
 
 api_router = APIRouter()
 
@@ -12,3 +13,4 @@ api_router.include_router(intelligence_router)
 api_router.include_router(chat_router)
 api_router.include_router(monitoring_router)
 api_router.include_router(dashboard_router)
+api_router.include_router(config_router)
