@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.models.models import (
     Company, Industry, Domain, Technology, Product, Service,
     Leadership, Location, Customer, Partner, News, Document,
-    Snapshot, Change
+    Snapshot, Change, ScrapeQueue, ScrapeStatus
 )
 from app.schemas.schemas import (
     CompanyResponse, ChangeResponse, ChangeSeverity,
@@ -21,6 +21,122 @@ from app.schemas.schemas import (
 from app.workers.tasks import scrape_company_task, check_for_changes_task
 
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
+
+
+@router.get("/scrape-queue/stats")
+def get_scrape_queue_stats(db: Session = Depends(get_db)):
+    """
+    Get statistics about the scrape queue.
+    """
+    total = db.query(ScrapeQueue).count()
+    pending = db.query(ScrapeQueue).filter(ScrapeQueue.status == ScrapeStatus.PENDING).count()
+    scraping = db.query(ScrapeQueue).filter(ScrapeQueue.status == ScrapeStatus.SCRAPING).count()
+    completed = db.query(ScrapeQueue).filter(ScrapeQueue.status == ScrapeStatus.COMPLETED).count()
+    failed = db.query(ScrapeQueue).filter(ScrapeQueue.status == ScrapeStatus.FAILED).count()
+    queued = db.query(ScrapeQueue).filter(ScrapeQueue.status == ScrapeStatus.QUEUED).count()
+    
+    return {
+        "total": total,
+        "pending": pending,
+        "scraping": scraping,
+        "completed": completed,
+        "failed": failed,
+        "queued": queued,
+        "ready_to_scrape": pending + queued
+    }
+
+
+@router.get("/scrape-queue")
+def get_scrape_queue(
+    limit: int = Query(50, ge=1, le=100),
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get items in the scrape queue.
+    """
+    query = db.query(ScrapeQueue)
+    
+    if status:
+        try:
+            status_enum = ScrapeStatus(status)
+            query = query.filter(ScrapeQueue.status == status_enum)
+        except ValueError:
+            pass
+    
+    items = query.order_by(
+        ScrapeQueue.priority.desc(),
+        ScrapeQueue.created_at.asc()
+    ).limit(limit).all()
+    
+    return [
+        {
+            "id": str(item.id),
+            "url": item.url,
+            "source": item.source,
+            "status": item.status.value if item.status else None,
+            "priority": item.priority,
+            "retry_count": item.retry_count,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "started_at": item.started_at.isoformat() if item.started_at else None,
+            "completed_at": item.completed_at.isoformat() if item.completed_at else None,
+            "error_message": item.error_message,
+        }
+        for item in items
+    ]
+
+
+@router.post("/scrape-queue/add")
+def add_to_scrape_queue(
+    url: str,
+    priority: int = Query(5, ge=1, le=10),
+    db: Session = Depends(get_db)
+):
+    """
+    Add a URL to the scrape queue.
+    """
+    # Check if already exists
+    existing = db.query(ScrapeQueue).filter(ScrapeQueue.url == url).first()
+    if existing:
+        return {"message": "URL already in queue", "id": str(existing.id), "status": existing.status.value}
+    
+    queue_item = ScrapeQueue(
+        url=url,
+        source="manual",
+        status=ScrapeStatus.PENDING,
+        priority=priority
+    )
+    db.add(queue_item)
+    db.commit()
+    db.refresh(queue_item)
+    
+    return {"message": "Added to queue", "id": str(queue_item.id)}
+
+
+@router.delete("/scrape-queue/{item_id}")
+def remove_from_scrape_queue(item_id: UUID, db: Session = Depends(get_db)):
+    """
+    Remove an item from the scrape queue.
+    """
+    item = db.query(ScrapeQueue).filter(ScrapeQueue.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Queue item not found")
+    
+    db.delete(item)
+    db.commit()
+    
+    return {"message": "Removed from queue"}
+
+
+@router.post("/scrape-queue/clear-failed")
+def clear_failed_items(db: Session = Depends(get_db)):
+    """
+    Clear all failed items from the queue.
+    """
+    deleted = db.query(ScrapeQueue).filter(ScrapeQueue.status == ScrapeStatus.FAILED).delete()
+    db.commit()
+    
+    return {"message": f"Cleared {deleted} failed items"}
 
 
 @router.get("/companies", response_model=List[CompanyResponse])

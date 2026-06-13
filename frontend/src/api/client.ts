@@ -149,6 +149,20 @@ export const monitoringApi = {
 
   checkCompanyChanges: (companyId: string) =>
     api.post(`/monitoring/check-changes/${companyId}`),
+
+  // Scrape Queue APIs
+  getScrapeQueueStats: () => api.get('/monitoring/scrape-queue/stats'),
+
+  getScrapeQueue: (params?: { limit?: number; status?: string }) =>
+    api.get('/monitoring/scrape-queue', { params }),
+
+  addToScrapeQueue: (url: string) =>
+    api.post('/monitoring/scrape-queue/add', null, { params: { url } }),
+
+  removeFromScrapeQueue: (itemId: string) =>
+    api.delete(`/monitoring/scrape-queue/${itemId}`),
+
+  clearFailedItems: () => api.post('/monitoring/scrape-queue/clear-failed'),
 }
 
 // Dashboard API
