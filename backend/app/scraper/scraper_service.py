@@ -4,11 +4,19 @@ Continuous Scraper Service
 This service runs continuously in the background, scraping companies 24/7.
 It can be run as a separate process: python run_scraper.py
 
+The scraper uses dynamic discovery rules based on:
+- Industries: IoT, Embedded Systems, Software, Automotive, etc.
+- Countries: All European countries (configurable)
+
+No hardcoded company URLs - everything is discovered dynamically!
+
 Usage:
     python run_scraper.py                    # Run with default settings
     python run_scraper.py --workers 3        # Run with 3 concurrent workers
     python run_scraper.py --no-discovery     # Disable auto-discovery
     python run_scraper.py --limit 100        # Limit to 100 URLs
+    python run_scraper.py --industries "IoT,Embedded"  # Filter by industries
+    python run_scraper.py --countries "DE,FR,NL"       # Filter by countries
 """
 
 import asyncio
@@ -17,7 +25,7 @@ import signal
 import sys
 import time
 from datetime import datetime
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
@@ -32,22 +40,108 @@ from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models.models import Company, ScrapeQueue, ScrapeStatus
 
+# Import new discovery modules
+from app.config.industries import (
+    get_all_industries, 
+    get_industry_by_name, 
+    Industry,
+    INDUSTRY_ALIASES
+)
+from app.config.countries import (
+    get_european_countries, 
+    get_country_by_code,
+    Country,
+    COUNTRY_ALIASES
+)
+from app.scraper.discovery_rules import DiscoveryRules
+from app.scraper.search_discovery import SearchDiscovery, DiscoveredCompany
+from app.scraper.directory_discovery import DirectoryDiscovery
+
 
 class ContinuousScraper:
     """
     Continuous scraper that runs 24/7, processing URLs from the queue.
+    Uses dynamic discovery based on industry + country configurations.
     """
     
-    def __init__(self, num_workers: int = 3, enable_discovery: bool = True):
+    # Discovery statistics
+    discovery_stats = {
+        'total_discovered': 0,
+        'search_discovered': 0,
+        'directory_discovered': 0,
+        'queries_run': 0,
+    }
+
+    def __init__(
+        self, 
+        num_workers: int = 3, 
+        enable_discovery: bool = True,
+        industries: Optional[List[str]] = None,
+        countries: Optional[List[str]] = None
+    ):
         self.num_workers = num_workers
         self.enable_discovery = enable_discovery
         self.running = True
         self.scraped_count = 0
         self.error_count = 0
         
+        # Initialize discovery components
+        self.discovery_rules = DiscoveryRules()
+        self.search_discovery = SearchDiscovery(rate_limit_seconds=2.0)
+        self.directory_discovery = DirectoryDiscovery(rate_limit_seconds=3.0)
+        
+        # Load industry and country filters
+        self.industries = self._load_industries(industries)
+        self.countries = self._load_countries(countries)
+        
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+    
+    def _load_industries(self, industry_filter: Optional[List[str]]) -> List[Industry]:
+        """Load industries based on filter or use all enabled"""
+        all_industries = get_all_industries()
+        
+        if not industry_filter:
+            return all_industries
+        
+        # Filter by provided names/aliases
+        filtered = []
+        for name in industry_filter:
+            # Try direct match first
+            industry = get_industry_by_name(name)
+            if not industry:
+                # Try alias resolution
+                industry = next(
+                    (i for i in all_industries if i.name.lower() == name.lower()),
+                    None
+                )
+            if industry and industry not in filtered:
+                filtered.append(industry)
+        
+        return filtered if filtered else all_industries
+    
+    def _load_countries(self, country_filter: Optional[List[str]]) -> List[Country]:
+        """Load countries based on filter or use all European"""
+        all_countries = get_european_countries()
+        
+        if not country_filter:
+            return all_countries
+        
+        # Filter by provided codes/names
+        filtered = []
+        for code in country_filter:
+            country = get_country_by_code(code)
+            if not country:
+                # Try name resolution
+                country = next(
+                    (c for c in all_countries if c.name.lower() == code.lower()),
+                    None
+                )
+            if country and country not in filtered:
+                filtered.append(country)
+        
+        return filtered if filtered else all_countries
     
     def _signal_handler(self, signum, frame):
         print("\n\nShutdown signal received. Finishing current tasks...")
@@ -55,14 +149,16 @@ class ContinuousScraper:
     
     def run(self):
         """Main loop - runs continuously"""
-        print("=" * 60)
-        print("  COMPANY INTELLIGENCE SCRAPER")
+        print("=" * 70)
+        print("  COMPANY INTELLIGENCE SCRAPER - DYNAMIC DISCOVERY")
         print("  Running continuously - Press Ctrl+C to stop")
-        print("=" * 60)
+        print("=" * 70)
         print(f"  Workers: {self.num_workers}")
         print(f"  Auto-discovery: {'Enabled' if self.enable_discovery else 'Disabled'}")
+        print(f"  Industries: {len(self.industries)} ({', '.join(i.name for i in self.industries[:3])}{'...' if len(self.industries) > 3 else ''})")
+        print(f"  Countries: {len(self.countries)} ({', '.join(c.name for c in self.countries[:3])}{'...' if len(self.countries) > 3 else ''})")
         print(f"  Ollama: {settings.OLLAMA_BASE_URL}")
-        print("=" * 60)
+        print("=" * 70)
         
         while self.running:
             try:
@@ -80,7 +176,15 @@ class ContinuousScraper:
                 print(f"Error in main loop: {e}")
                 time.sleep(5)
         
-        print(f"\nScraper stopped. Total scraped: {self.scraped_count}, Errors: {self.error_count}")
+        print(f"\n{'='*70}")
+        print(f"Scraper stopped.")
+        print(f"  Total scraped: {self.scraped_count}")
+        print(f"  Total errors: {self.error_count}")
+        print(f"  Total discovered: {self.discovery_stats['total_discovered']}")
+        print(f"    - Via search: {self.discovery_stats['search_discovered']}")
+        print(f"    - Via directories: {self.discovery_stats['directory_discovered']}")
+        print(f"  Total queries run: {self.discovery_stats['queries_run']}")
+        print("="*70)
     
     def _process_queue(self):
         """Process URLs from the scrape queue"""
@@ -429,7 +533,10 @@ class ContinuousScraper:
             db.rollback()
     
     def _discover_new_urls(self):
-        """Auto-discover new company URLs to scrape"""
+        """
+        Auto-discover new company URLs using dynamic discovery rules.
+        Uses search engines and directories based on configured industries + countries.
+        """
         db = SessionLocal()
         try:
             # Check how many pending items we have
@@ -437,146 +544,277 @@ class ContinuousScraper:
                 ScrapeQueue.status.in_([ScrapeStatus.PENDING, ScrapeStatus.QUEUED])
             ).count()
             
-            # If queue is running low, add more URLs
+            # If queue is running low, discover more URLs
             if pending_count < 50:
-                self._discover_from_industry_sources(db)
-                self._discover_from_search(db)
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Queue running low ({pending_count}), starting discovery...")
+                
+                # Step 1: Search-based discovery
+                self._discover_via_search(db)
+                
+                # Step 2: Directory-based discovery  
+                self._discover_via_directories(db)
+                
+                print(f"  Discovery complete. Queue now has {db.query(ScrapeQueue).filter(ScrapeQueue.status.in_([ScrapeStatus.PENDING, ScrapeStatus.QUEUED])).count()} pending items")
                 
         finally:
             db.close()
     
-    def _discover_from_industry_sources(self, db: Session):
-        """Discover companies from industry directories and sources"""
-        # Industry-specific sources to discover companies
-        discovery_sources = [
-            # Technology & Software
-            {'url': 'https://www.builtin.com/companies', 'industry': 'Technology'},
-            {'url': 'https://crunchbase.com/discover/organization.companies', 'industry': 'Technology'},
-            
-            # Industrial & Manufacturing
-            {'url': 'https://www.thomasnet.com/companies/', 'industry': 'Manufacturing'},
-            
-            # Auto & Automotive
-            {'url': 'https://www.automotiveworld.com/companies/', 'industry': 'Automotive'},
-            
-            # General business directories
-            {'url': 'https://www.yellowpages.com', 'industry': 'General'},
-        ]
+    def _discover_via_search(self, db: Session):
+        """
+        Discover companies using search engines (DuckDuckGo, Bing).
+        This is the PRIMARY discovery method - generates queries dynamically.
+        """
+        print(f"\n  === Search-Based Discovery ===")
         
-        for source in random.sample(discovery_sources, min(2, len(discovery_sources))):
-            try:
-                response = requests.get(source['url'], timeout=10)
-                soup = BeautifulSoup(response.content, 'lxml')
+        discovered_urls: Set[str] = set()
+        
+        # Get already queued/scraped URLs to avoid duplicates
+        existing_urls = set(
+            url[0] for url in db.query(ScrapeQueue.url).all()
+        )
+        scraped_urls = set(
+            url[0] for url in db.query(Company.website).filter(Company.website.isnot(None)).all()
+        )
+        discovered_urls = existing_urls | scraped_urls
+        
+        # Iterate through industry + country combinations
+        for industry in self.industries:
+            for country in self.countries:
+                if not self.running:
+                    break
                 
-                # Find company links
-                for a in soup.find_all('a', href=True):
-                    href = a['href']
-                    text = a.get_text(strip=True)
+                # Generate queries for this combination
+                queries = self.discovery_rules.generate_queries(industry, country)
+                
+                print(f"  {industry.name} + {country.name}: {len(queries)} queries")
+                
+                # Run a few queries per combination (to avoid too many requests)
+                queries_to_run = queries[:5]  # Limit queries per combo
+                
+                for query in queries_to_run:
+                    if not self.running:
+                        break
                     
-                    # Look for company links (usually start with /company/ or /firm/)
-                    if '/company/' in href or '/firm/' in href:
-                        url = urljoin(source['url'], href)
+                    self.discovery_stats['queries_run'] += 1
+                    
+                    try:
+                        # Search for companies
+                        companies = self.search_discovery.search(query, max_results=10)
                         
-                        # Check if already in queue
-                        existing = db.query(ScrapeQueue).filter(ScrapeQueue.url == url).first()
-                        if existing:
-                            continue
+                        for company in companies:
+                            if company.url in discovered_urls:
+                                continue
+                            
+                            # Check if valid company URL
+                            if not self._is_valid_company_url(company.url):
+                                continue
+                            
+                            discovered_urls.add(company.url)
+                            
+                            # Queue the URL
+                            queue_item = ScrapeQueue(
+                                url=company.url,
+                                source='search_discovery',
+                                source_query=f"{industry.name}|{country.code}|{query}",
+                                status=ScrapeStatus.QUEUED,
+                                priority=industry.priority + country.priority,
+                                metadata={
+                                    'industry': industry.name,
+                                    'country': country.code,
+                                    'search_query': query,
+                                    'search_source': company.source,
+                                    'company_title': company.title,
+                                }
+                            )
+                            db.add(queue_item)
+                            self.discovery_stats['search_discovered'] += 1
                         
-                        # Add to queue
-                        queue_item = ScrapeQueue(
-                            url=url,
-                            source='discovery',
-                            source_query=source['industry'],
-                            status=ScrapeStatus.QUEUED,
-                            priority=5
-                        )
-                        db.add(queue_item)
+                        # Rate limit between queries
+                        time.sleep(random.uniform(1, 3))
+                        
+                    except Exception as e:
+                        print(f"    Search error for query '{query[:40]}...': {e}")
+                        continue
                 
-                db.commit()
-                
-            except Exception as e:
-                print(f"    Discovery error from {source['url']}: {e}")
-                db.rollback()
-    
-    def _discover_from_search(self, db: Session):
-        """Discover companies using search queries"""
-        # Search queries for different industries
-        search_queries = [
-            'site:.com company about automation robotics',
-            'site:.com industrial IoT solutions',
-            'site:.com automotive technology company',
-            'site:.com medical device manufacturer',
-            'site:.com aerospace engineering company',
-            'site:.com renewable energy company',
-            'site:.com manufacturing automation',
-            'site:.com embedded systems company',
-        ]
-        
-        # Note: In production, you would use a search API (Google, Bing)
-        # For now, we'll add some seed URLs from known company lists
-        
-        seed_companies = [
-            # Tech companies
-            'https://www.siemens.com',
-            'https://www.bosch.com',
-            'https://www.abb.com',
-            'https://www.schneider-electric.com',
-            'https://www.emerson.com',
-            'https://www.rockwellautomation.com',
-            'https://wwwHoneywell.com',
-            'https://www.ge.com',
-            # Automotive
-            'https://www.bosch-mobility.com',
-            'https://www.denso.com',
-            'https://www.continental.com',
-            'https://www ZF.com',
-            # Industrial
-            'https://www.fanuc.com',
-            'https://www.kuka.com',
-            'https://www. YASKAWA.com',
-            'https://www.mitsubishi-electric.com',
-            # Medical
-            'https://www.medtronic.com',
-            'https://www.siemens-healthineers.com',
-            'https://www.gehealthcare.com',
-            # Aerospace
-            'https://www Boeing.com',
-            'https://www Airbus.com',
-            'https://www Lockheedmartin.com',
-            'https://www.raytheon.com',
-        ]
-        
-        for url in random.sample(seed_companies, min(10, len(seed_companies))):
-            existing = db.query(ScrapeQueue).filter(ScrapeQueue.url == url).first()
-            if existing:
-                continue
-            
-            queue_item = ScrapeQueue(
-                url=url,
-                source='discovery',
-                source_query='industry_seed',
-                status=ScrapeStatus.QUEUED,
-                priority=7  # Higher priority for seed URLs
-            )
-            db.add(queue_item)
+                # Small delay between industry combinations
+                time.sleep(random.uniform(2, 4))
         
         try:
             db.commit()
+            self.discovery_stats['total_discovered'] += self.discovery_stats['search_discovered']
+            print(f"  Search discovery: {self.discovery_stats['search_discovered']} companies queued")
         except Exception as e:
+            print(f"  Search discovery error: {e}")
             db.rollback()
+    
+    def _discover_via_directories(self, db: Session):
+        """
+        Discover companies from industry directories.
+        This is a SECONDARY discovery method to supplement search.
+        """
+        print(f"\n  === Directory-Based Discovery ===")
+        
+        discovered_urls: Set[str] = set()
+        
+        # Get already queued/scraped URLs
+        existing_urls = set(
+            url[0] for url in db.query(ScrapeQueue.url).all()
+        )
+        scraped_urls = set(
+            url[0] for url in db.query(Company.website).filter(Company.website.isnot(None)).all()
+        )
+        discovered_urls = existing_urls | scraped_urls
+        
+        directory_count = 0
+        
+        # Discover from industry-specific directories
+        for industry in self.industries[:3]:  # Limit to avoid too many requests
+            if not self.running:
+                break
+            
+            try:
+                entries = self.directory_discovery.discover_industry_specific(industry)
+                
+                for entry in entries:
+                    if entry.url in discovered_urls:
+                        continue
+                    
+                    if not self._is_valid_company_url(entry.url):
+                        continue
+                    
+                    discovered_urls.add(entry.url)
+                    
+                    queue_item = ScrapeQueue(
+                        url=entry.url,
+                        source='directory_discovery',
+                        source_query=f"{industry.name}|{entry.directory_name}",
+                        status=ScrapeStatus.QUEUED,
+                        priority=industry.priority,
+                        metadata={
+                            'industry': industry.name,
+                            'directory': entry.directory_name,
+                            'company_name': entry.name,
+                        }
+                    )
+                    db.add(queue_item)
+                    directory_count += 1
+                
+                time.sleep(random.uniform(2, 4))
+                
+            except Exception as e:
+                print(f"  Directory discovery error for {industry.name}: {e}")
+        
+        # Discover from European country-specific directories
+        for country in self.countries[:3]:  # Top 3 countries
+            if not self.running:
+                break
+            
+            try:
+                entries = self.directory_discovery.discover_european_industrial(country)
+                
+                for entry in entries:
+                    if entry.url in discovered_urls:
+                        continue
+                    
+                    if not self._is_valid_company_url(entry.url):
+                        continue
+                    
+                    discovered_urls.add(entry.url)
+                    
+                    queue_item = ScrapeQueue(
+                        url=entry.url,
+                        source='directory_discovery',
+                        source_query=f"{country.name}|{entry.directory_name}",
+                        status=ScrapeStatus.QUEUED,
+                        priority=country.priority,
+                        metadata={
+                            'country': country.name,
+                            'country_code': country.code,
+                            'directory': entry.directory_name,
+                            'company_name': entry.name,
+                        }
+                    )
+                    db.add(queue_item)
+                    directory_count += 1
+                
+                time.sleep(random.uniform(2, 4))
+                
+            except Exception as e:
+                print(f"  Directory discovery error for {country.name}: {e}")
+        
+        try:
+            db.commit()
+            self.discovery_stats['directory_discovered'] = directory_count
+            self.discovery_stats['total_discovered'] += directory_count
+            print(f"  Directory discovery: {directory_count} companies queued")
+        except Exception as e:
+            print(f"  Directory commit error: {e}")
+            db.rollback()
+    
+    def _is_valid_company_url(self, url: str) -> bool:
+        """
+        Check if a URL looks like a valid company website.
+        Filters out social media, search engines, etc.
+        """
+        if not url:
+            return False
+        
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        
+        # Skip social media and major platforms
+        skip_domains = {
+            'facebook.com', 'twitter.com', 'x.com', 'instagram.com',
+            'linkedin.com', 'youtube.com', 'pinterest.com', 'tiktok.com',
+            'snapchat.com', 'reddit.com', 'github.com', 'stackoverflow.com',
+            'google.com', 'bing.com', 'duckduckgo.com', 'yahoo.com',
+            'baidu.com', 'yandex.com',
+            'amazon.com', 'ebay.com', 'aliexpress.com',
+            'wikipedia.org', 'wikimedia.org',
+            'microsoft.com', 'apple.com',
+            'wordpress.com', 'blogspot.com', 'wix.com', 'squarespace.com',
+        }
+        
+        for skip in skip_domains:
+            if domain.endswith(skip) or domain == skip:
+                # Allow linkedin company pages
+                if 'linkedin.com/company/' in url and '/company/' in url:
+                    continue
+                return False
+        
+        # Skip URLs with common tracking parameters
+        skip_patterns = ['/login', '/signup', '/register', '/search', 
+                        '/cart', '/checkout', '/account', '/settings',
+                        '/privacy', '/terms', '/contact', '/blog', '/news']
+        
+        for pattern in skip_patterns:
+            if pattern in url.lower():
+                return False
+        
+        return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Company Intelligence Scraper')
+    parser = argparse.ArgumentParser(description='Company Intelligence Scraper - Dynamic Discovery')
     parser.add_argument('--workers', type=int, default=3, help='Number of concurrent workers')
     parser.add_argument('--no-discovery', action='store_true', help='Disable auto-discovery')
     parser.add_argument('--limit', type=int, default=None, help='Limit total URLs to scrape')
+    parser.add_argument('--industries', type=str, default=None, 
+                       help='Comma-separated list of industries (e.g., "IoT,Embedded,Automotive")')
+    parser.add_argument('--countries', type=str, default=None,
+                       help='Comma-separated list of country codes (e.g., "DE,FR,NL")')
     
     args = parser.parse_args()
     
+    # Parse industries and countries
+    industries = args.industries.split(',') if args.industries else None
+    countries = args.countries.split(',') if args.countries else None
+    
     scraper = ContinuousScraper(
         num_workers=args.workers,
-        enable_discovery=not args.no_discovery
+        enable_discovery=not args.no_discovery,
+        industries=industries,
+        countries=countries
     )
     
     scraper.run()
