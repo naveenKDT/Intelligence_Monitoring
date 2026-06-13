@@ -18,6 +18,46 @@ class CompanyStatus(str, enum.Enum):
     ARCHIVED = "archived"
 
 
+class ScrapeStatus(str, enum.Enum):
+    PENDING = "pending"
+    SCRAPING = "scraping"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    QUEUED = "queued"
+
+
+class ScrapeQueue(Base):
+    """Queue of URLs to be scraped"""
+    __tablename__ = 'scrape_queue'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    url = Column(String(1000), nullable=False, unique=True)
+    source = Column(String(100))  # 'manual', 'discovery', 'link_extraction', 'search'
+    source_query = Column(String(500))  # For discovery sources
+    
+    status = Column(SQLEnum(ScrapeStatus), default=ScrapeStatus.PENDING)
+    
+    priority = Column(Integer, default=5)  # 1-10, higher = more priority
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    
+    error_message = Column(Text)
+    
+    company_id = Column(UUID(as_uuid=True), ForeignKey('companies.id', ondelete='SET NULL'), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    
+    metadata = Column(JSONB, default=dict)
+    
+    __table_args__ = (
+        Index('ix_scrape_queue_status', 'status'),
+        Index('ix_scrape_queue_priority', 'priority'),
+    )
+
+
 # Association tables for many-to-many relationships
 company_industries = Table(
     'company_industries',

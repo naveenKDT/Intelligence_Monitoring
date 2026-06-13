@@ -20,6 +20,11 @@ import {
   Skeleton,
   Alert,
   CircularProgress,
+  LinearProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material'
 import {
   Add as AddIcon,
@@ -28,6 +33,10 @@ import {
   Stop as StopIcon,
   PlayArrow as PlayIcon,
   Notifications as NotificationIcon,
+  CloudDownload as ScrapeIcon,
+  CheckCircle as CheckIcon,
+  Error as ErrorIcon,
+  Schedule as PendingIcon,
 } from '@mui/icons-material'
 import { monitoringApi, companiesApi } from '../api/client'
 
@@ -35,13 +44,30 @@ const Monitoring = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState(0)
-  const [scrapeUrl, setScrapeUrl] = useState('')
+  const [addUrlDialogOpen, setAddUrlDialogOpen] = useState(false)
+  const [newUrl, setNewUrl] = useState('')
 
+  // Fetch scrape queue stats
+  const { data: queueStats, isLoading: loadingStats } = useQuery({
+    queryKey: ['monitoring', 'scrape-queue', 'stats'],
+    queryFn: () => monitoringApi.getScrapeQueueStats().then((res) => res.data),
+    refetchInterval: 10000, // Refresh every 10 seconds
+  })
+
+  // Fetch scrape queue items
+  const { data: queueItems, isLoading: loadingQueue } = useQuery({
+    queryKey: ['monitoring', 'scrape-queue'],
+    queryFn: () => monitoringApi.getScrapeQueue({ limit: 50 }).then((res) => res.data),
+    refetchInterval: 5000, // Refresh every 5 seconds
+  })
+
+  // Fetch monitored companies
   const { data: monitoredCompanies, isLoading: loadingCompanies } = useQuery({
     queryKey: ['monitoring', 'companies'],
     queryFn: () => monitoringApi.getMonitoredCompanies(50).then((res) => res.data),
   })
 
+  // Fetch detected changes
   const { data: changes, isLoading: loadingChanges } = useQuery({
     queryKey: ['monitoring', 'changes'],
     queryFn: () => monitoringApi.getChanges({ limit: 50, days: 30 }).then((res) => res.data),
@@ -54,58 +80,155 @@ const Monitoring = () => {
     },
   })
 
-  const scrapeMutation = useMutation({
-    mutationFn: () => monitoringApi.triggerScrape(undefined, scrapeUrl),
+  // Add URL to queue mutation
+  const addToQueueMutation = useMutation({
+    mutationFn: (url: string) => monitoringApi.addToScrapeQueue(url),
     onSuccess: () => {
-      setScrapeUrl('')
-      queryClient.invalidateQueries({ queryKey: ['monitoring'] })
+      queryClient.invalidateQueries({ queryKey: ['monitoring', 'scrape-queue'] })
+      setAddUrlDialogOpen(false)
+      setNewUrl('')
     },
   })
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return 'error'
-      case 'high':
-        return 'warning'
-      case 'medium':
-        return 'info'
-      default:
-        return 'default'
+  // Clear failed items mutation
+  const clearFailedMutation = useMutation({
+    mutationFn: () => monitoringApi.clearFailedItems(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['monitoring', 'scrape-queue', 'stats'] })
+    },
+  })
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'success'
+      case 'scraping': return 'info'
+      case 'pending':
+      case 'queued': return 'warning'
+      case 'failed': return 'error'
+      default: return 'default'
     }
   }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'completed': return <CheckIcon fontSize="small" />
+      case 'scraping': return <CircularProgress size={16} />
+      case 'pending':
+      case 'queued': return <PendingIcon fontSize="small" />
+      case 'failed': return <ErrorIcon fontSize="small" />
+      default: return null
+    }
+  }
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'error'
+      case 'high': return 'warning'
+      case 'medium': return 'info'
+      default: return 'default'
+    }
+  }
+
+  // Calculate progress percentage
+  const totalProcessed = (queueStats?.completed || 0) + (queueStats?.failed || 0)
+  const progressPercent = queueStats?.total ? Math.round((totalProcessed / queueStats.total) * 100) : 0
 
   return (
     <Box>
       <Typography variant="h4" fontWeight={600} gutterBottom>
-        Monitoring
+        Monitoring Dashboard
       </Typography>
       <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-        Monitor companies and track changes over time
+        View scraping progress and detected company changes
       </Typography>
 
-      {/* Quick Scrape */}
+      {/* Queue Stats Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card className="dashboard-card">
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <ScrapeIcon color="primary" />
+                <Typography variant="h4" fontWeight={700}>
+                  {queueStats?.total || 0}
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Total in Queue
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card className="dashboard-card">
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <PendingIcon color="warning" />
+                <Typography variant="h4" fontWeight={700}>
+                  {(queueStats?.pending || 0) + (queueStats?.queued || 0)}
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Ready to Scrape
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card className="dashboard-card">
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CheckIcon color="success" />
+                <Typography variant="h4" fontWeight={700}>
+                  {queueStats?.completed || 0}
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Completed
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card className="dashboard-card">
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <ErrorIcon color="error" />
+                <Typography variant="h4" fontWeight={700}>
+                  {queueStats?.failed || 0}
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Failed
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Progress Bar */}
       <Card sx={{ mb: 4 }}>
         <CardContent>
-          <Typography variant="h6" fontWeight={600} gutterBottom>
-            Quick Scrape
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <TextField
-              placeholder="Enter URL to scrape (e.g., https://example.com)"
-              value={scrapeUrl}
-              onChange={(e) => setScrapeUrl(e.target.value)}
-              fullWidth
-              size="small"
-            />
-            <Button
-              variant="contained"
-              startIcon={scrapeMutation.isPending ? <CircularProgress size={20} /> : <AddIcon />}
-              onClick={() => scrapeMutation.mutate()}
-              disabled={scrapeMutation.isPending || !scrapeUrl}
-            >
-              Scrape
-            </Button>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6" fontWeight={600}>
+              Scraping Progress
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {queueStats?.scraping || 0} currently scraping
+            </Typography>
+          </Box>
+          <LinearProgress 
+            variant="determinate" 
+            value={progressPercent} 
+            sx={{ height: 10, borderRadius: 5 }}
+          />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {totalProcessed} processed
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {progressPercent}% complete
+            </Typography>
           </Box>
         </CardContent>
       </Card>
@@ -116,12 +239,140 @@ const Monitoring = () => {
         onChange={(_, v) => setActiveTab(v)}
         sx={{ mb: 3 }}
       >
+        <Tab label={`Scrape Queue (${queueItems?.length || 0})`} />
         <Tab label={`Monitored Companies (${monitoredCompanies?.length || 0})`} />
         <Tab label={`Detected Changes (${changes?.length || 0})`} />
       </Tabs>
 
-      {/* Monitored Companies */}
+      {/* Scrape Queue Tab */}
       {activeTab === 0 && (
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mb: 2 }}>
+            <Button
+              variant="outlined"
+              color="error"
+              size="small"
+              onClick={() => clearFailedMutation.mutate()}
+              disabled={clearFailedMutation.isPending || !queueStats?.failed}
+            >
+              Clear Failed
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setAddUrlDialogOpen(true)}
+            >
+              Add URL to Queue
+            </Button>
+          </Box>
+
+          <Card>
+            <CardContent sx={{ p: 0 }}>
+              {loadingQueue ? (
+                <Box sx={{ p: 3 }}>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} variant="rectangular" height={60} sx={{ mb: 2, borderRadius: 1 }} />
+                  ))}
+                </Box>
+              ) : queueItems?.length > 0 ? (
+                <List>
+                  {queueItems.map((item: any) => (
+                    <ListItem
+                      key={item.id}
+                      divider
+                      secondaryAction={
+                        <Chip 
+                          icon={getStatusIcon(item.status)} 
+                          label={item.status} 
+                          color={getStatusColor(item.status) as any}
+                          size="small"
+                        />
+                      }
+                    >
+                      <ListItemText
+                        primary={
+                          <Typography variant="body1" sx={{ 
+                            maxWidth: '60%', 
+                            overflow: 'hidden', 
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {item.url}
+                          </Typography>
+                        }
+                        secondary={
+                          <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              Source: {item.source}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Priority: {item.priority}
+                            </Typography>
+                            {item.retry_count > 0 && (
+                              <Typography variant="caption" color="error">
+                                Retries: {item.retry_count}
+                              </Typography>
+                            )}
+                          </Box>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              ) : (
+                <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <ScrapeIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                  <Typography variant="h6" color="text.secondary">
+                    No URLs in queue
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Start the scraper service to auto-discover companies, or add URLs manually.
+                  </Typography>
+                  <Button variant="contained" onClick={() => setAddUrlDialogOpen(true)}>
+                    Add URL to Queue
+                  </Button>
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Instructions */}
+          <Card sx={{ mt: 3 }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={600} gutterBottom>
+                How to Start the Scraper
+              </Typography>
+              <Typography variant="body2" color="text.secondary" component="pre" sx={{ 
+                bgcolor: 'grey.100', 
+                p: 2, 
+                borderRadius: 1,
+                fontFamily: 'monospace',
+                whiteSpace: 'pre-wrap'
+              }}>
+{`# Run the scraper in a separate terminal:
+
+cd backend
+python run_scraper.py
+
+# Or run as background daemon:
+python run_scraper.py --daemon
+
+# Check status:
+python run_scraper.py --status
+
+# Stop the daemon:
+python run_scraper.py --stop`}
+              </Typography>
+              <Alert severity="info" sx={{ mt: 2 }}>
+                The scraper runs as a separate process and continuously discovers and scrapes company websites 24/7. The UI only displays data that has already been scraped.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Box>
+      )}
+
+      {/* Monitored Companies Tab */}
+      {activeTab === 1 && (
         <Grid container spacing={3}>
           {loadingCompanies ? (
             Array.from({ length: 6 }).map((_, i) => (
@@ -158,17 +409,10 @@ const Monitoring = () => {
 
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Box sx={{ display: 'flex', gap: 1 }}>
-                        <IconButton
-                          size="small"
-                          onClick={() => navigate(`/companies/${company.id}`)}
-                        >
+                        <IconButton size="small" onClick={() => navigate(`/companies/${company.id}`)}>
                           <ViewIcon />
                         </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => disableMutation.mutate(company.id)}
-                          disabled={disableMutation.isPending}
-                        >
+                        <IconButton size="small" onClick={() => disableMutation.mutate(company.id)}>
                           <StopIcon />
                         </IconButton>
                       </Box>
@@ -191,8 +435,8 @@ const Monitoring = () => {
         </Grid>
       )}
 
-      {/* Detected Changes */}
-      {activeTab === 1 && (
+      {/* Detected Changes Tab */}
+      {activeTab === 2 && (
         <Card>
           <CardContent sx={{ p: 0 }}>
             {loadingChanges ? (
@@ -249,6 +493,34 @@ const Monitoring = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Add URL Dialog */}
+      <Dialog open={addUrlDialogOpen} onClose={() => setAddUrlDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add URL to Scrape Queue</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <TextField
+              autoFocus
+              fullWidth
+              label="Company Website URL"
+              placeholder="https://example.com"
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              helperText="Enter the URL of a company website to add to the scraping queue"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddUrlDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => addToQueueMutation.mutate(newUrl)}
+            disabled={!newUrl || addToQueueMutation.isPending}
+          >
+            {addToQueueMutation.isPending ? 'Adding...' : 'Add to Queue'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
