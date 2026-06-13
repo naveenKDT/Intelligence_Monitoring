@@ -451,9 +451,9 @@ def update_company_from_scrape(db, company, scraped_data):
     
     if "text_content" in scraped_data:
         # Store additional content in metadata
-        metadata = company.metadata or {}
+        metadata = company.metadata_json or {}
         metadata["scraped_content"] = scraped_data["text_content"][:50000]  # Limit size
-        company.metadata = metadata
+        company.metadata_json = metadata
 
 
 def create_company_from_scrape(db, scraped_data):
@@ -466,9 +466,9 @@ def create_company_from_scrape(db, scraped_data):
     db.add(company)
     
     if "text_content" in scraped_data:
-        metadata = company.metadata or {}
+        metadata = company.metadata_json or {}
         metadata["scraped_content"] = scraped_data["text_content"][:50000]
-        company.metadata = metadata
+        company.metadata_json = metadata
     
     return company
 
