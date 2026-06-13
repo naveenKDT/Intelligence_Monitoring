@@ -50,7 +50,7 @@ class ScrapeQueue(Base):
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     
-    metadata = Column(JSONB, default=dict)
+    metadata_json = Column(JSONB, default=dict)
     
     __table_args__ = (
         Index('ix_scrape_queue_status', 'status'),
@@ -160,7 +160,7 @@ class Company(Base):
     regions_served = Column(ARRAY(String))
     
     # Metadata
-    metadata = Column(JSONB, default=dict)
+    metadata_json = Column(JSONB, default=dict)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -346,7 +346,7 @@ class Product(Base):
     target_industry = Column(ARRAY(String))
     target_market = Column(ARRAY(String))
     
-    metadata = Column(JSONB, default=dict)
+    metadata_json = Column(JSONB, default=dict)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -371,7 +371,7 @@ class Service(Base):
     industries_served = Column(ARRAY(String))
     customer_segments = Column(ARRAY(String))
     
-    metadata = Column(JSONB, default=dict)
+    metadata_json = Column(JSONB, default=dict)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -448,7 +448,7 @@ class News(Base):
     news_type = Column(String(100))  # announcement, partnership, acquisition, expansion, product_launch, general
     published_date = Column(DateTime(timezone=True))
     
-    metadata = Column(JSONB, default=dict)
+    metadata_json = Column(JSONB, default=dict)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -474,7 +474,7 @@ class Document(Base):
     content = Column(Text)
     extracted_text = Column(Text)
     
-    metadata = Column(JSONB, default=dict)
+    metadata_json = Column(JSONB, default=dict)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

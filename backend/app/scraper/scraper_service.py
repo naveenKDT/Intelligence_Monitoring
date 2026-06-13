@@ -406,10 +406,10 @@ class ContinuousScraper:
                 existing.description = data.get('description', existing.description)
                 existing.short_description = data.get('description', '')[:1000]
                 if data.get('text_content'):
-                    metadata = existing.metadata or {}
+                    metadata = existing.metadata_json or {}
                     metadata['scraped_content'] = data['text_content'][:100000]
                     metadata['last_scraped'] = datetime.utcnow().isoformat()
-                    existing.metadata = metadata
+                    existing.metadata_json = metadata
                 existing.last_scraped_at = datetime.utcnow()
                 company = existing
             else:
