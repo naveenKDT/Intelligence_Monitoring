@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: scraper_postgres
+    environment:
+      POSTGRES_DB: scraper_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: your-secure-password-here
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraper_network
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: scraper_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@scraper.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - scraper_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  scraper_network:
+    driver: bridge
