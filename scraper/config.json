@@ -1,0 +1,16 @@
+{
+  "scraping": {
+    "industry": "SaaS",
+    "country": "India"
+  },
+  "openai": {
+    "apiKey": "sk-your-openai-api-key-here"
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "scraper_db",
+    "user": "postgres",
+    "password": "your-password-here"
+  }
+}
